@@ -32,6 +32,9 @@ func evalSeries(x0, h float64, n int) []float64 {
 }
 
 func EulerSystem(x0, h float64, n int) []float64 {
+	f1 := func(x, u, v float64) float64 {
+		return v
+	}
 	f2 := func(x, u, v float64) float64 {
 		if x == 0.0 {
 			return 1.0 / 12.0
@@ -45,10 +48,9 @@ func EulerSystem(x0, h float64, n int) []float64 {
 	u0[0] = 1.0
 	v0[0] = -0.5
 	for i := 0; i < n; i++ {
-		u2 := f2(x[i], u0[i], v0[i])
 		x[i+1] = x[i] + h
-		u0[i+1] = u0[i] + h*v0[i]
-		v0[i+1] = v0[i] + h*u2
+		u0[i+1] = u0[i] + h*f1(x[i], u0[i], v0[i])
+		v0[i+1] = v0[i] + h*f2(x[i], u0[i], v0[i])
 	}
 	return u0
 }
@@ -91,7 +93,7 @@ func Run() {
 	p.X.Label.Text = "x"
 	p.Y.Label.Text = "u(x)"
 
-	err := plotutil.AddLinePoints(p, "Степенной ряд", seriesXY, "Метод Эйлера", eulerXY)
+	err := plotutil.AddLines(p, "Степенной ряд", seriesXY, "Метод Эйлера", eulerXY)
 	if err != nil {
 		fmt.Println("Ошибка построения графика:", err)
 		return
