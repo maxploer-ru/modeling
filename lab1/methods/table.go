@@ -6,7 +6,6 @@ import (
 	"text/tabwriter"
 )
 
-// PrintTable выводит форматированную таблицу.
 func PrintTable(header []string, rows [][]string) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	for i, h := range header {
