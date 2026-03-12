@@ -21,17 +21,17 @@ import (
 //	return a
 //}
 
-func evalSeries(h float64, n int) []float64 {
-	y := make([]float64, n+1)
-	x := 0.0
-	for i := 0; i <= n; i++ {
+func evalSeries(x0, h float64, n int) []float64 {
+	y := make([]float64, n)
+	x := x0
+	for i := 0; i < n; i++ {
 		y[i] = 1 - x/2 + math.Pow(x, 2)/24.0 - math.Pow(x, 3)/720.0
 		x += h
 	}
 	return y
 }
 
-func EulerSystem(h float64, n int) []float64 {
+func EulerSystem(x0, h float64, n int) []float64 {
 	f2 := func(x, u, v float64) float64 {
 		if x == 0.0 {
 			return 1.0 / 12.0
@@ -41,7 +41,7 @@ func EulerSystem(h float64, n int) []float64 {
 	x := make([]float64, n+1)
 	u0 := make([]float64, n+1)
 	v0 := make([]float64, n+1)
-	x[0] = 0.0
+	x[0] = x0
 	u0[0] = 1.0
 	v0[0] = -0.5
 	for i := 0; i < n; i++ {
@@ -54,29 +54,42 @@ func EulerSystem(h float64, n int) []float64 {
 }
 
 func Run() {
-	x0, x1 := 0.0, 10.0
-	n := 100
-	h := (x1 - x0) / float64(n)
+	begin, end := -1.0, 5.0
+	steps := 100
+	step := (end - begin) / float64(steps)
 
-	y := evalSeries(h, n)
-	yEuler := EulerSystem(h, n)
-
-	p := plot.New()
-	p.Title.Text = "Задача 1: 4xu'' + 2u' + u = 0"
-	p.X.Label.Text = "x"
-	p.Y.Label.Text = "u(x)"
-
-	seriesXY := make(plotter.XYs, n+1)
-	for i := 0; i <= n; i++ {
-		seriesXY[i].X = x0 + float64(i)*h
-		seriesXY[i].Y = y[i]
+	x := make([]float64, steps)
+	for i := 0; i < steps; i++ {
+		x[i] = begin + float64(i)*step
 	}
 
-	eulerXY := make(plotter.XYs, n+1)
-	for i := 0; i <= n; i++ {
-		eulerXY[i].X = x0 + float64(i)*h
+	y := evalSeries(begin, step, steps)
+
+	nNeg := int(math.Round(-begin / step))
+	nPos := steps - nNeg
+
+	eulerPos := EulerSystem(0, step, nPos)
+	eulerNeg := EulerSystem(0, -step, nNeg)
+
+	yEuler := make([]float64, 0, steps)
+	for i := nNeg; i >= 1; i-- {
+		yEuler = append(yEuler, eulerNeg[i])
+	}
+	yEuler = append(yEuler, eulerPos...)
+
+	seriesXY := make(plotter.XYs, steps)
+	eulerXY := make(plotter.XYs, steps)
+	for i := 0; i < steps; i++ {
+		seriesXY[i].X = x[i]
+		seriesXY[i].Y = y[i]
+		eulerXY[i].X = x[i]
 		eulerXY[i].Y = yEuler[i]
 	}
+
+	p := plot.New()
+	p.Title.Text = "4xu'' + 2u' + u = 0"
+	p.X.Label.Text = "x"
+	p.Y.Label.Text = "u(x)"
 
 	err := plotutil.AddLinePoints(p, "Степенной ряд", seriesXY, "Метод Эйлера", eulerXY)
 	if err != nil {
