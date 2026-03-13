@@ -86,7 +86,7 @@ func computeAll(h float64, epsilon float64, sampleEvery int) ([]result, float64)
 			results = append(results, result{x, p1, p2, p3, p4, yEuler})
 		}
 		cnt++
-		x += h
+		x = h * float64(cnt)
 	}
 	xMax := x - h
 	return results, xMax
