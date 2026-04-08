@@ -1,0 +1,412 @@
+package main
+
+import (
+	"fmt"
+	"image/color"
+	"log"
+	"math"
+	"os"
+	"strconv"
+	"strings"
+
+	"gonum.org/v1/plot"
+	"gonum.org/v1/plot/plotter"
+	"gonum.org/v1/plot/vg"
+)
+
+var (
+	T0Table            []float64
+	ITable, mTable     []float64
+	TTable, sigmaTable []float64
+
+	R  = 0.35
+	lP = 12.0
+	LK = 187e-6
+	CK = 268e-6
+	RK = 0.25
+	U0 = 1400.0
+	I0 = 0.5
+	TW = 2000.0
+)
+
+func readTable1(filename string) ([]float64, []float64, []float64) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var I []float64
+	var T0 []float64
+	var m []float64
+	for i, line := range lines {
+		if i == 0 {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 3 {
+			continue
+		}
+		iVal, _ := strconv.ParseFloat(parts[0], 64)
+		t0Val, _ := strconv.ParseFloat(parts[1], 64)
+		mVal, _ := strconv.ParseFloat(parts[2], 64)
+		I = append(I, iVal)
+		T0 = append(T0, t0Val)
+		m = append(m, mVal)
+	}
+	return I, T0, m
+}
+
+func readTable2(filename string) ([]float64, []float64) {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	var T []float64
+	var sigma []float64
+	for i, line := range lines {
+		if i == 0 {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		tVal, _ := strconv.ParseFloat(parts[0], 64)
+		sVal, _ := strconv.ParseFloat(parts[1], 64)
+		T = append(T, tVal)
+		sigma = append(sigma, sVal)
+	}
+	return T, sigma
+}
+
+func setupCartesian(p *plot.Plot) {
+	p.Add(plotter.NewGrid())
+	transparent := color.NRGBA{R: 0, G: 0, B: 0, A: 0}
+	p.X.Color = transparent
+	p.Y.Color = transparent
+	p.X.Tick.Color = color.Black
+	p.Y.Tick.Color = color.Black
+	p.X.Tick.Label.Color = color.Black
+	p.Y.Tick.Label.Color = color.Black
+}
+
+func addAxis(p *plot.Plot) {
+	axisColor := color.NRGBA{R: 0, G: 0, B: 0, A: 255}
+	xMin, xMax := p.X.Min, p.X.Max
+	if xMin == xMax {
+		xMin, xMax = -1, 1
+	}
+	hLine := plotter.XYs{{X: xMin, Y: 0}, {X: xMax, Y: 0}}
+	hAxis, _ := plotter.NewLine(hLine)
+	hAxis.LineStyle.Color = axisColor
+	hAxis.LineStyle.Width = vg.Points(1.5)
+	hAxis.LineStyle.Dashes = nil
+	p.Add(hAxis)
+
+	yMin, yMax := p.Y.Min, p.Y.Max
+	if yMin == yMax {
+		yMin, yMax = -1, 1
+	}
+	vLine := plotter.XYs{{X: 0, Y: yMin}, {X: 0, Y: yMax}}
+	vAxis, _ := plotter.NewLine(vLine)
+	vAxis.LineStyle.Color = axisColor
+	vAxis.LineStyle.Width = vg.Points(1.5)
+	vAxis.LineStyle.Dashes = nil
+	p.Add(vAxis)
+}
+
+func styleCartesian(p *plot.Plot) {
+	setupCartesian(p)
+	//addAxis(p)
+	p.Legend.Top = true
+	p.Legend.Left = false
+	p.Legend.XOffs = -vg.Points(5)
+	p.Legend.YOffs = -vg.Points(5)
+}
+
+func saveLinePlot(x, y []float64, filename, xlabel, ylabel, title string) {
+	p := plot.New()
+	p.Title.Text = title
+	p.X.Label.Text = xlabel
+	p.Y.Label.Text = ylabel
+
+	pts := make(plotter.XYs, len(x))
+	for i := range x {
+		pts[i].X = x[i]
+		pts[i].Y = y[i]
+	}
+	line, _ := plotter.NewLine(pts)
+	p.Add(line)
+	styleCartesian(p)
+	if err := p.Save(8*vg.Inch, 6*vg.Inch, filename); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func binSearch(arr []float64, target float64) int {
+	low, high := -1, len(arr)
+	for low+1 < high {
+		mid := (low + high) / 2
+		if arr[mid] < target {
+			low = mid
+		} else {
+			high = mid
+		}
+	}
+	return high
+}
+
+func newtonCoeffs(x, y []float64) []float64 {
+	n := len(x)
+	a := make([]float64, n)
+	copy(a, y)
+	for j := 1; j < n; j++ {
+		for i := n - 1; i >= j; i-- {
+			a[i] = (a[i] - a[i-1]) / (x[i] - x[i-j])
+		}
+	}
+	return a
+}
+
+func newtonEval(coeffs, x []float64, target float64) float64 {
+	res := 0.0
+	for i := len(coeffs) - 1; i >= 0; i-- {
+		res = coeffs[i] + (target-x[i])*res
+	}
+	return res
+}
+
+func newtonInterp(xTab, yTab []float64, target float64, degree int) float64 {
+	if degree > len(xTab) {
+		degree = len(xTab)
+	}
+	idx := binSearch(xTab, target)
+	left := idx - degree/2
+	right := left + degree
+	if left < 0 {
+		left = 0
+		right = degree
+	}
+	if right > len(xTab) {
+		right = len(xTab)
+		left = right - degree
+	}
+	xSub := xTab[left:right]
+	ySub := yTab[left:right]
+	coeffs := newtonCoeffs(xSub, ySub)
+	return newtonEval(coeffs, xSub, target)
+}
+
+func T0FromI(I float64) float64 {
+	return newtonInterp(ITable, T0Table, I, 4)
+}
+
+func mFromI(I float64) float64 {
+	return newtonInterp(ITable, mTable, I, 4)
+}
+
+func sigmaFromT(T float64) float64 {
+	return newtonInterp(TTable, sigmaTable, T, 4)
+}
+
+func TZ(I, z float64) float64 {
+	T0 := T0FromI(I)
+	m := mFromI(I)
+	return T0 + (TW-T0)*math.Pow(z, m)
+}
+
+func trapezoid(x, y []float64) float64 {
+	sum := 0.0
+	for i := 1; i < len(x); i++ {
+		h := x[i] - x[i-1]
+		sum += (y[i] + y[i-1]) * h / 2.0
+	}
+	return sum
+}
+
+func sigmaIntegral(I float64, steps int) float64 {
+	z := make([]float64, steps+1)
+	f := make([]float64, steps+1)
+	dz := 1.0 / float64(steps)
+	for i := 0; i <= steps; i++ {
+		zi := float64(i) * dz
+		z[i] = zi
+		T := TZ(I, zi)
+		f[i] = sigmaFromT(T) * zi
+	}
+	return trapezoid(z, f)
+}
+
+func Rp(I float64) float64 {
+	integral := sigmaIntegral(I, 100)
+	return lP / (2.0 * math.Pi * R * R * integral)
+}
+
+func dIdt(U, I, RExtra float64, useRp bool) float64 {
+	var RSum float64
+	if useRp {
+		RSum = RK + Rp(I)
+	} else {
+		RSum = RExtra
+	}
+	return (U - RSum*I) / LK
+}
+
+func dUdt(I float64) float64 {
+	return -I / CK
+}
+
+func rk2Step(t, U, I, h, RExtra float64, useRp bool) (float64, float64, float64) {
+	k1 := dIdt(U, I, RExtra, useRp)
+	q1 := dUdt(I)
+
+	Umid := U + q1*(h/2)
+	Imid := I + k1*(h/2)
+
+	k2 := dIdt(Umid, Imid, RExtra, useRp)
+	q2 := dUdt(Imid)
+
+	Inew := I + h*k2
+	Unew := U + h*q2
+	tnew := t + h
+
+	return tnew, Unew, Inew
+}
+
+func solve(h float64, tEnd float64, RExtra float64, useRp bool) ([]float64, []float64, []float64) {
+	n := int(math.Ceil(tEnd/h)) + 1
+	t := make([]float64, n)
+	U := make([]float64, n)
+	I := make([]float64, n)
+	t[0] = 0.0
+	U[0] = U0
+	I[0] = I0
+	for i := 0; i < n-1; i++ {
+		t[i+1], U[i+1], I[i+1] = rk2Step(t[i], U[i], I[i], h, RExtra, useRp)
+	}
+	return t, U, I
+}
+
+func pulseDuration(t, I []float64) float64 {
+	Imax := I[0]
+	for _, v := range I {
+		if v > Imax {
+			Imax = v
+		}
+	}
+	thresh := 0.35 * Imax
+	var t1, t2 float64
+	for i := 0; i < len(I); i++ {
+		if I[i] >= thresh {
+			if i == 0 {
+				t1 = t[i]
+			} else {
+				frac := (thresh - I[i-1]) / (I[i] - I[i-1])
+				t1 = t[i-1] + frac*(t[i]-t[i-1])
+			}
+			break
+		}
+	}
+	for i := len(I) - 1; i >= 0; i-- {
+		if I[i] >= thresh {
+			if i == len(I)-1 {
+				t2 = t[i]
+			} else {
+				frac := (thresh - I[i]) / (I[i+1] - I[i])
+				t2 = t[i] + frac*(t[i+1]-t[i])
+			}
+			break
+		}
+	}
+	return t2 - t1
+}
+
+func estimateStep(tEnd, R_extra float64, useRp bool) float64 {
+	h := 1e-1
+	tolerance := 1e-3
+	for {
+		_, U1, I1 := solve(h, tEnd, R_extra, useRp)
+		_, U2, I2 := solve(h/2, tEnd, R_extra, useRp)
+		errI := math.Abs(I1[len(I1)-1]-I2[len(I2)-1]) / math.Abs(I1[len(I1)-1])
+		errU := math.Abs(U1[len(U1)-1]-U2[len(U2)-1]) / math.Abs(U1[len(U1)-1])
+		if errI < tolerance && errU < tolerance {
+			return h
+		}
+		h /= 2
+		if h < 1e-8 {
+			return h
+		}
+	}
+}
+
+func main() {
+	ITable, T0Table, mTable = readTable1("lab2/table1.txt")
+	TTable, sigmaTable = readTable2("lab2/table2.txt")
+
+	h := 1e-6
+	tEnd := 600e-6
+	fmt.Println(estimateStep(tEnd, 0.0, false))
+
+	t, U, I := solve(h, tEnd, 0.0, true)
+
+	fmt.Printf("Шаг сетки h = %.0e с\n", h)
+
+	saveLinePlot(t, I, "I_t.png", "t, с", "I, А", "Ток I(t)")
+
+	saveLinePlot(t, U, "U_t.png", "t, с", "U, В", "Напряжение U(t)")
+
+	RpVals := make([]float64, len(t))
+	IrpVals := make([]float64, len(t))
+	T0Vals := make([]float64, len(t))
+	for i, curI := range I {
+		RpVals[i] = Rp(curI)
+		IrpVals[i] = curI * RpVals[i]
+		T0Vals[i] = T0FromI(curI)
+	}
+	saveLinePlot(t, RpVals, "Rp_t.png", "t, с", "Rp, Ом", "Сопротивление Rp(t)")
+	saveLinePlot(t, IrpVals, "I_Rp_t.png", "t, с", "I*Rp, В", "Произведение I(t)*Rp(t)")
+	saveLinePlot(t, T0Vals, "T0_t.png", "t, с", "T0, K", "Температура T0(t)")
+
+	t2, _, I2 := solve(1e-6, 2000e-6, 0.0, false)
+	saveLinePlot(t2, I2, "I_t_R0.png", "t, с", "I, А", "Ток при Rk+Rp=0")
+
+	t3, _, I3 := solve(2e-8, 20e-6, 200.0, false)
+	saveLinePlot(t3, I3, "I_t_R200.png", "t, с", "I, А", "Ток при R=200 Ом")
+
+	CVals := []float64{150e-6, 180e-6, 210e-6, 240e-6, 270e-6, 300e-6, 330e-6, 360e-6, 390e-6, 420e-6}
+	var durC []float64
+	origC := CK
+	for _, c := range CVals {
+		CK = c
+		_, _, Icur := solve(h, tEnd, 0.0, true)
+		durC = append(durC, pulseDuration(t, Icur))
+	}
+	CK = origC
+
+	LVals := []float64{50e-6, 80e-6, 110e-6, 140e-6, 170e-6, 200e-6, 230e-6, 260e-6, 290e-6, 320e-6}
+	var durL []float64
+	origL := LK
+	for _, l := range LVals {
+		LK = l
+		_, _, Icur := solve(h, tEnd, 0.0, true)
+		durL = append(durL, pulseDuration(t, Icur))
+	}
+	LK = origL
+
+	RVals := []float64{0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55}
+	var durR []float64
+	origR := RK
+	for _, r := range RVals {
+		RK = r
+		_, _, Icur := solve(h, tEnd, 0.0, true)
+		durR = append(durR, pulseDuration(t, Icur))
+	}
+	RK = origR
+
+	saveLinePlot(CVals, durC, "C_duration.png", "Ck, Ф", "tимп, с", "Влияние ёмкости на длительность")
+	saveLinePlot(LVals, durL, "L_duration.png", "Lk, Гн", "tимп, с", "Влияние индуктивности на длительность")
+	saveLinePlot(RVals, durR, "R_duration.png", "Rk, Ом", "tимп, с", "Влияние сопротивления на длительность")
+
+	fmt.Println("Графики сохранены в файлы PNG.")
+}
