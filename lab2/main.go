@@ -258,17 +258,18 @@ func dUdt(I float64) float64 {
 }
 
 func rk2Step(t, U, I, h, RExtra float64, useRp bool) (float64, float64, float64) {
+	alpha := 0.5
 	k1 := dIdt(U, I, RExtra, useRp)
 	q1 := dUdt(I)
 
-	Umid := U + q1*(h/2)
-	Imid := I + k1*(h/2)
+	Umid := U + q1*(h/(2.0*alpha))
+	Imid := I + k1*(h/(2.0*alpha))
 
 	k2 := dIdt(Umid, Imid, RExtra, useRp)
 	q2 := dUdt(Imid)
 
-	Inew := I + h*k2
-	Unew := U + h*q2
+	Inew := I + h*((1.0-alpha)*k1+alpha*k2)
+	Unew := U + h*((1.0-alpha)*q1+alpha*q2)
 	tnew := t + h
 
 	return tnew, Unew, Inew
@@ -322,12 +323,12 @@ func pulseDuration(t, I []float64) float64 {
 	return t2 - t1
 }
 
-func estimateStep(tEnd, R_extra float64, useRp bool) float64 {
+func estimateStep(tEnd, RExtra float64, useRp bool) float64 {
 	h := 1e-1
 	tolerance := 1e-3
 	for {
-		_, U1, I1 := solve(h, tEnd, R_extra, useRp)
-		_, U2, I2 := solve(h/2, tEnd, R_extra, useRp)
+		_, U1, I1 := solve(h, tEnd, RExtra, useRp)
+		_, U2, I2 := solve(h/2, tEnd, RExtra, useRp)
 		errI := math.Abs(I1[len(I1)-1]-I2[len(I2)-1]) / math.Abs(I1[len(I1)-1])
 		errU := math.Abs(U1[len(U1)-1]-U2[len(U2)-1]) / math.Abs(U1[len(U1)-1])
 		if errI < tolerance && errU < tolerance {
@@ -346,7 +347,7 @@ func main() {
 
 	h := 1e-6
 	tEnd := 600e-6
-	fmt.Println(estimateStep(tEnd, 0.0, false))
+	fmt.Println(estimateStep(tEnd, 0.0, true))
 
 	t, U, I := solve(h, tEnd, 0.0, true)
 
@@ -371,7 +372,7 @@ func main() {
 	t2, _, I2 := solve(1e-6, 2000e-6, 0.0, false)
 	saveLinePlot(t2, I2, "I_t_R0.png", "t, с", "I, А", "Ток при Rk+Rp=0")
 
-	t3, _, I3 := solve(2e-8, 20e-6, 200.0, false)
+	t3, _, I3 := solve(1e-8, 20e-6, 200.0, false)
 	saveLinePlot(t3, I3, "I_t_R200.png", "t, с", "I, А", "Ток при R=200 Ом")
 
 	CVals := []float64{150e-6, 180e-6, 210e-6, 240e-6, 270e-6, 300e-6, 330e-6, 360e-6, 390e-6, 420e-6}
@@ -407,6 +408,4 @@ func main() {
 	saveLinePlot(CVals, durC, "C_duration.png", "Ck, Ф", "tимп, с", "Влияние ёмкости на длительность")
 	saveLinePlot(LVals, durL, "L_duration.png", "Lk, Гн", "tимп, с", "Влияние индуктивности на длительность")
 	saveLinePlot(RVals, durR, "R_duration.png", "Rk, Ом", "tимп, с", "Влияние сопротивления на длительность")
-
-	fmt.Println("Графики сохранены в файлы PNG.")
 }
