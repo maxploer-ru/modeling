@@ -2,16 +2,7 @@ package main
 
 import (
 	"fmt"
-	"image/color"
-	"log"
 	"math"
-	"os"
-	"strconv"
-	"strings"
-
-	"gonum.org/v1/plot"
-	"gonum.org/v1/plot/plotter"
-	"gonum.org/v1/plot/vg"
 )
 
 var (
@@ -28,121 +19,6 @@ var (
 	I0 = 0.5
 	TW = 2000.0
 )
-
-func readTable1(filename string) ([]float64, []float64, []float64) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		log.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	var I []float64
-	var T0 []float64
-	var m []float64
-	for i, line := range lines {
-		if i == 0 {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) < 3 {
-			continue
-		}
-		iVal, _ := strconv.ParseFloat(parts[0], 64)
-		t0Val, _ := strconv.ParseFloat(parts[1], 64)
-		mVal, _ := strconv.ParseFloat(parts[2], 64)
-		I = append(I, iVal)
-		T0 = append(T0, t0Val)
-		m = append(m, mVal)
-	}
-	return I, T0, m
-}
-
-func readTable2(filename string) ([]float64, []float64) {
-	data, err := os.ReadFile(filename)
-	if err != nil {
-		log.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	var T []float64
-	var sigma []float64
-	for i, line := range lines {
-		if i == 0 {
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			continue
-		}
-		tVal, _ := strconv.ParseFloat(parts[0], 64)
-		sVal, _ := strconv.ParseFloat(parts[1], 64)
-		T = append(T, tVal)
-		sigma = append(sigma, sVal)
-	}
-	return T, sigma
-}
-
-func setupCartesian(p *plot.Plot) {
-	p.Add(plotter.NewGrid())
-	transparent := color.NRGBA{R: 0, G: 0, B: 0, A: 0}
-	p.X.Color = transparent
-	p.Y.Color = transparent
-	p.X.Tick.Color = color.Black
-	p.Y.Tick.Color = color.Black
-	p.X.Tick.Label.Color = color.Black
-	p.Y.Tick.Label.Color = color.Black
-}
-
-func addAxis(p *plot.Plot) {
-	axisColor := color.NRGBA{R: 0, G: 0, B: 0, A: 255}
-	xMin, xMax := p.X.Min, p.X.Max
-	if xMin == xMax {
-		xMin, xMax = -1, 1
-	}
-	hLine := plotter.XYs{{X: xMin, Y: 0}, {X: xMax, Y: 0}}
-	hAxis, _ := plotter.NewLine(hLine)
-	hAxis.LineStyle.Color = axisColor
-	hAxis.LineStyle.Width = vg.Points(1.5)
-	hAxis.LineStyle.Dashes = nil
-	p.Add(hAxis)
-
-	yMin, yMax := p.Y.Min, p.Y.Max
-	if yMin == yMax {
-		yMin, yMax = -1, 1
-	}
-	vLine := plotter.XYs{{X: 0, Y: yMin}, {X: 0, Y: yMax}}
-	vAxis, _ := plotter.NewLine(vLine)
-	vAxis.LineStyle.Color = axisColor
-	vAxis.LineStyle.Width = vg.Points(1.5)
-	vAxis.LineStyle.Dashes = nil
-	p.Add(vAxis)
-}
-
-func styleCartesian(p *plot.Plot) {
-	setupCartesian(p)
-	//addAxis(p)
-	p.Legend.Top = true
-	p.Legend.Left = false
-	p.Legend.XOffs = -vg.Points(5)
-	p.Legend.YOffs = -vg.Points(5)
-}
-
-func saveLinePlot(x, y []float64, filename, xlabel, ylabel, title string) {
-	p := plot.New()
-	p.Title.Text = title
-	p.X.Label.Text = xlabel
-	p.Y.Label.Text = ylabel
-
-	pts := make(plotter.XYs, len(x))
-	for i := range x {
-		pts[i].X = x[i]
-		pts[i].Y = y[i]
-	}
-	line, _ := plotter.NewLine(pts)
-	p.Add(line)
-	styleCartesian(p)
-	if err := p.Save(8*vg.Inch, 6*vg.Inch, filename); err != nil {
-		log.Fatal(err)
-	}
-}
 
 func binSearch(arr []float64, target float64) int {
 	low, high := -1, len(arr)
@@ -289,6 +165,25 @@ func solve(h float64, tEnd float64, RExtra float64, useRp bool) ([]float64, []fl
 	return t, U, I
 }
 
+func solveBackward(tStart, tEnd, h float64, RExtra float64, useRp bool, UInit, IInit float64) ([]float64, []float64, []float64) {
+	if h > 0 {
+		h = -h
+	}
+	n := int(math.Ceil(math.Abs(tEnd-tStart)/math.Abs(h))) + 1
+	t := make([]float64, n)
+	U := make([]float64, n)
+	I := make([]float64, n)
+
+	t[0] = tStart
+	U[0] = UInit
+	I[0] = IInit
+
+	for i := 0; i < n-1; i++ {
+		t[i+1], U[i+1], I[i+1] = rk2Step(t[i], U[i], I[i], h, RExtra, useRp)
+	}
+	return t, U, I
+}
+
 func pulseDuration(t, I []float64) float64 {
 	Imax := I[0]
 	for _, v := range I {
@@ -350,6 +245,11 @@ func main() {
 	fmt.Println(estimateStep(tEnd, 0.0, true))
 
 	t, U, I := solve(h, tEnd, 0.0, true)
+	//t, U, I := solveBackward(tEnd, 0.0, h, 0.0, true, 107.38206305692975, 305.8902099384868)
+	//fmt.Println("I(tEnd) =", I[len(I)-1])
+	//fmt.Println("U(tEnd) =", U[len(U)-1])
+	//I(tEnd) = 0.5334032574671053
+	//U(tEnd) = 1400.0000146796363
 
 	fmt.Printf("Шаг сетки h = %.0e с\n", h)
 
